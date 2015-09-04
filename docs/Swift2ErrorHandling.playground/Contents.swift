@@ -1,5 +1,5 @@
 //: Playground - noun: a place where people can play
-//: This playground was created to demonstrate the defer keywork and swift 2.0 error handling
+//: This playground was created to demonstrate the defer keyword and swift 2.0 error handling
 //: The motivation was to see if we could replace the Deferred and Result third party dependencies
 //: with the native implementations
 //:
@@ -66,7 +66,7 @@ do {
 
 print("")
 
-//: You can add as many deferred blocks as you like and then will be executed in reverse order (i.e. unrolled, like a FILO queue)
+//: You can add as many deferred blocks as you like and they will be executed in reverse order (i.e. unrolled, like a FILO queue)
 func count() {
     defer { print("Six") }
     defer { print("Five") }
@@ -227,6 +227,17 @@ func disableErrorPropogationExample() {
 }
 
 disableErrorPropogationExample()
+
+//: if you simply don't want to handle the error yourself but don't want to lose it you can just propgate it back up the chain by making your function throw
+func callsThrowingFunction() throws {
+    return try throwingMethod()
+}
+
+do {
+    try callsThrowingFunction()
+} catch {
+    print(error)
+}
 
 //: But othertimes you don't actually care what the error is, you just want to do something based on whether or not it succeeds. 
 //: Or your throwing function _may_ return something but won't if it fails. These are cases for try?
