@@ -6,6 +6,7 @@ import Shared
 import Storage
 import AVFoundation
 import XCGLogger
+import Breakpad
 
 private let log = Logger.browserLogger
 
@@ -43,7 +44,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         self.window = UIWindow(frame: UIScreen.mainScreen().bounds)
         self.window!.backgroundColor = UIColor.whiteColor()
 
-        let defaultRequest = NSURLRequest(URL: UIConstants.AboutHomeURL)
+        let defaultRequest = NSURLRequest(URL: UIConstants.DefaultHomePage)
         self.tabManager = TabManager(defaultNewTabRequest: defaultRequest, profile: profile)
         browserViewController = BrowserViewController(profile: profile, tabManager: self.tabManager)
 
@@ -98,6 +99,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(application: UIApplication, didFinishLaunchingWithOptions launchOptions: [NSObject : AnyObject]?) -> Bool {
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0)) {
+            AdjustIntegration.sharedInstance.triggerApplicationDidFinishLaunchingWithOptions(launchOptions)
+        }
         self.window!.makeKeyAndVisible()
         return true
     }
@@ -127,7 +131,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     // We sync in the foreground only, to avoid the possibility of runaway resource usage.
     // Eventually we'll sync in response to notifications.
     func applicationDidBecomeActive(application: UIApplication) {
-        self.profile?.syncManager.beginTimedSyncs()
+        self.profile?.syncManager.applicationDidBecomeActive()
 
         // We could load these here, but then we have to futz with the tab counter
         // and making NSURLRequests.
@@ -135,11 +139,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidEnterBackground(application: UIApplication) {
-        self.profile?.syncManager.endTimedSyncs()
+        self.profile?.syncManager.applicationDidEnterBackground()
 
-        let taskId = application.beginBackgroundTaskWithExpirationHandler { _ in }
-        self.profile?.shutdown()
-        application.endBackgroundTask(taskId)
+        var taskId: UIBackgroundTaskIdentifier = 0
+        taskId = application.beginBackgroundTaskWithExpirationHandler { _ in
+            log.warning("Running out of background time, but we have a profile shutdown pending.")
+            application.endBackgroundTask(taskId)
+        }
+
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0)) {
+            self.profile?.shutdown()
+            application.endBackgroundTask(taskId)
+        }
     }
 
     private func setUpWebServer(profile: Profile) {
@@ -164,6 +175,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         defaults.registerDefaults(["UserAgent": firefoxUA])
         FaviconFetcher.userAgent = firefoxUA
         SDWebImageDownloader.sharedDownloader().setValue(firefoxUA, forHTTPHeaderField: "User-Agent")
+
+        // Record the user agent for use by search suggestion clients.
+        SearchViewController.userAgent = firefoxUA
     }
 
     func application(application: UIApplication, handleActionWithIdentifier identifier: String?, forLocalNotification notification: UILocalNotification, completionHandler: () -> Void) {
@@ -271,4 +285,3 @@ public func configureCrashReporter(reporter: CrashReporter, optedIn: Bool?) {
         configureReporter()
     }
 }
-

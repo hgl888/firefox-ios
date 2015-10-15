@@ -52,7 +52,8 @@ private struct ShareDialogControllerUX {
     static let DividerHeight = 0.5
 
     static let TableRowHeight: CGFloat = 44                                                         // System default
-    static let TableRowFont = UIFont.systemFontOfSize(UIFont.labelFontSize())
+    static let TableRowFont = UIFont.systemFontOfSize(14)
+    static let TableRowFontMinScale: CGFloat = 0.8
     static let TableRowTintColor = UIColor(red:0.427, green:0.800, blue:0.102, alpha:1.0)           // Green tint for the checkmark
     static let TableRowTextColor = UIColor(rgb: 0x555555)
 
@@ -88,7 +89,7 @@ class ShareDialogController: UIViewController, UITableViewDataSource, UITableVie
         // Setup the NavigationItem
 
         navItem = UINavigationItem()
-        navItem.leftBarButtonItem = UIBarButtonItem(title: NSLocalizedString("Cancel", comment: "Cancel button title in share dialog"), style: .Plain, target: self, action: "cancel")
+        navItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: UIBarButtonSystemItem.Cancel, target: self, action: "cancel")
         navItem.leftBarButtonItem?.setTitleTextAttributes([NSFontAttributeName: ShareDialogControllerUX.NavigationBarCancelButtonFont], forState: UIControlState.Normal)
 
         navItem.rightBarButtonItem = UIBarButtonItem(title: NSLocalizedString("Add", tableName: "ShareTo", comment: "Add button in the share dialog"), style: UIBarButtonItemStyle.Done, target: self, action: "add")
@@ -222,6 +223,8 @@ class ShareDialogController: UIViewController, UITableViewDataSource, UITableVie
         cell.tintColor = ShareDialogControllerUX.TableRowTintColor
         cell.layoutMargins = UIEdgeInsetsZero
         cell.textLabel?.text = ShareDestinations[indexPath.row].name
+        cell.textLabel?.adjustsFontSizeToFitWidth = true
+        cell.textLabel?.minimumScaleFactor = ShareDialogControllerUX.TableRowFontMinScale
         cell.imageView?.image = UIImage(named: ShareDestinations[indexPath.row].image)
         return cell
     }

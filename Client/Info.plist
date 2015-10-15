@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>itms-books</string>
+	</array>
 	<key>AppID</key>
 	<string>$(MOZ_APP_ID)</string>
 	<key>BreakpadProduct</key>
@@ -100,5 +104,9 @@
 	<true/>
 	<key>Vendor</key>
 	<string>$(MOZ_VENDOR)</string>
+        <key>AdjustEnvironment</key>
+        <string>$(ADJUST_ENVIRONMENT)</string>
+        <key>AdjustAppToken</key>
+        <string>$(ADJUST_APP_TOKEN)</string>
 </dict>
 </plist>

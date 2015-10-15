@@ -3,6 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import AVFoundation
+import Shared
+import XCGLogger
+
+private let log = Logger.browserLogger
 
 private struct AuralProgressBarUX {
     static let TickPeriod = 1.0
@@ -39,22 +43,51 @@ class AuralProgressBar {
             tickPlayer = AVAudioPlayerNode()
             tickPlayer.pan = -Float(AuralProgressBarUX.TickProgressPanSpread)
             engine.attachNode(tickPlayer)
-            engine.connect(tickPlayer, to: engine.mainMixerNode, format: nil)
 
             progressPlayer = AVAudioPlayerNode()
             progressPlayer.pan = +Float(AuralProgressBarUX.TickProgressPanSpread)
             engine.attachNode(progressPlayer)
-            engine.connect(progressPlayer, to: engine.mainMixerNode, format: nil)
+
+            connectPlayerNodes()
+
+            NSNotificationCenter.defaultCenter().addObserver(self, selector: Selector("audioEngineConfigurationDidChange:"), name: AVAudioEngineConfigurationChangeNotification, object: nil)
+        }
+
+        deinit {
+            NSNotificationCenter.defaultCenter().removeObserver(self, name: AVAudioEngineConfigurationChangeNotification, object: nil)
+        }
+
+        func connectPlayerNodes() {
+            let mainMixer = engine.mainMixerNode
+            engine.connect(tickPlayer, to: mainMixer, format: mainMixer.outputFormatForBus(0))
+            engine.connect(progressPlayer, to: mainMixer, format: tickBuffer.format)
+        }
+
+        func disconnectPlayerNodes() {
+            engine.disconnectNodeOutput(tickPlayer)
+            engine.disconnectNodeOutput(progressPlayer)
+        }
+
+        @objc func audioEngineConfigurationDidChange(notification: NSNotification) {
+            disconnectPlayerNodes()
+            connectPlayerNodes()
+
+            if !engine.running {
+                do { try engine.start() }
+                catch {
+                    log.error("Unable to restart AVAudioEngine. Player will not automatically restart : \(error)")
+                }
+            }
         }
 
         func start() {
             do {
                 try engine.start()
-            } catch _ {
-            }
-            tickPlayer.play()
-            progressPlayer.play()
-            tickPlayer.scheduleBuffer(tickBuffer, atTime: nil, options: AVAudioPlayerNodeBufferOptions.Loops) { () -> Void in
+                tickPlayer.play()
+                progressPlayer.play()
+                tickPlayer.scheduleBuffer(tickBuffer, atTime: nil, options: AVAudioPlayerNodeBufferOptions.Loops) { }
+            } catch {
+                log.error("Unable to start AVAudioEngine. Tick & Progress player will not play : \(error)")
             }
         }
 
@@ -68,8 +101,7 @@ class AuralProgressBar {
             // using exp2 and log2 instead of exp and log as "log" clashes with XCGLogger.log
             let pitch = AuralProgressBarUX.ProgressStartFrequency * exp2(log2(AuralProgressBarUX.ProgressEndFrequency/AuralProgressBarUX.ProgressStartFrequency) * progress)
             let buffer = UI.tone(progressPlayer.outputFormatForBus(0), pitch: pitch, volume: AuralProgressBarUX.ProgressVolume, duration: AuralProgressBarUX.ProgressDuration)
-            progressPlayer.scheduleBuffer(buffer, atTime: nil, options: .Interrupts) { () -> Void in
-            }
+            progressPlayer.scheduleBuffer(buffer, atTime: nil, options: .Interrupts) { }
         }
 
         class func tone(format: AVAudioFormat, pitch: Double, volume: Double, duration: Double, period: Double? = nil) -> AVAudioPCMBuffer {

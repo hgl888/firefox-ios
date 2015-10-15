@@ -108,6 +108,7 @@ class ThumbnailCell: UICollectionViewCell {
 
     lazy var backgroundImage: UIImageView = {
         let backgroundImage = UIImageView()
+        backgroundImage.backgroundColor = UIColor.clearColor()
         backgroundImage.contentMode = UIViewContentMode.ScaleAspectFill
         return backgroundImage
     }()
@@ -115,7 +116,9 @@ class ThumbnailCell: UICollectionViewCell {
     lazy var backgroundEffect: UIVisualEffectView? = {
         let blur = UIBlurEffect(style: UIBlurEffectStyle.Light)
         let vib = UIVibrancyEffect(forBlurEffect: blur)
-        return DeviceInfo.isBlurSupported() ? UIVisualEffectView(effect: blur) : nil
+        let effect: UIVisualEffectView? = DeviceInfo.isBlurSupported() ? UIVisualEffectView(effect: blur) : nil
+        effect?.alpha = 0
+        return effect
     }()
 
     lazy var imageWrapper: UIView = {
@@ -131,6 +134,7 @@ class ThumbnailCell: UICollectionViewCell {
         let removeButton = UIButton()
         removeButton.setImage(UIImage(named: "TileCloseButton"), forState: UIControlState.Normal)
         removeButton.addTarget(self, action: "SELdidRemove", forControlEvents: UIControlEvents.TouchUpInside)
+        removeButton.accessibilityLabel = NSLocalizedString("Remove page", comment: "Button shown in editing mode to remove this site from the top sites panel.")
         removeButton.hidden = true
         removeButton.imageEdgeInsets = ThumbnailCellUX.RemoveButtonInsets
         return removeButton

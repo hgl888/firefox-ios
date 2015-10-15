@@ -64,28 +64,27 @@ function createHighlightOverlay(element) {
   }
 }
 
+function handleTouchMove(event) {
+  if (longPressTimeout) {
+       var { screenX, screenY } = event.touches[0];
+        // Cancel the context menu if finger has moved beyond the maximum allowed distance.
+       if (Math.abs(touchDownX - screenX) > MAX_RADIUS || Math.abs(touchDownY - screenY) > MAX_RADIUS) {
+         cancel();
+      }
+   }
+}
+
 function handleTouchEnd(event) {
   cancel();
 
-  event.target.removeEventListener("touchend", handleTouchEnd);
-  event.target.removeEventListener("mouseup", handleTouchEnd);
-  event.target.removeEventListener("touchmove", handleTouchMove);
+  removeEventListener("touchend", handleTouchEnd);
+  removeEventListener("mouseup", handleTouchEnd);
+  removeEventListener("touchmove", handleTouchMove);
 
   // If we're showing the context menu, prevent the page from handling the click event.
   if (touchHandled) {
     touchHandled = false;
     event.preventDefault();
-  }
-}
-
-function handleTouchMove(event) {
-  if (longPressTimeout) {
-    var { screenX, screenY } = event.touches[0];
-
-    // Cancel the context menu if finger has moved beyond the maximum allowed distance.
-    if (Math.abs(touchDownX - screenX) > MAX_RADIUS || Math.abs(touchDownY - screenY) > MAX_RADIUS) {
-      cancel();
-    }
   }
 }
 
@@ -138,9 +137,13 @@ addEventListener("touchstart", function (event) {
       cancel();
       webkit.messageHandlers.contextMenuMessageHandler.postMessage(data);
     }, 500);
+
+    webkit.messageHandlers.contextMenuMessageHandler.postMessage({ handled: true });
   }
 }, true);
 
+// If the user touches down and moves enough to make the page scroll, cancel the
+// context menu handlers.
 addEventListener("scroll", cancel);
 
 }) ();

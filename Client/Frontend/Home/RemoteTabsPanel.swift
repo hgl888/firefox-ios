@@ -23,7 +23,7 @@ private struct RemoteTabsPanelUX {
 
     static let EmptyStateInstructionsFont = UIFont.systemFontOfSize(UIConstants.DeviceFontSize - 1, weight: UIFontWeightLight)
     static let EmptyStateInstructionsTextColor = UIColor.grayColor()
-    static let EmptyStateInstructionsWidth = 226
+    static let EmptyStateInstructionsWidth = 252
     static let EmptyStateTopPaddingInBetweenItems: CGFloat = 15 // UX TODO I set this to 8 so that it all fits on landscape
     static let EmptyStateSignInButtonColor = UIColor(red:0.3, green:0.62, blue:1, alpha:1)
     static let EmptyStateSignInButtonTitleFont = UIFont.systemFontOfSize(16)
@@ -33,8 +33,12 @@ private struct RemoteTabsPanelUX {
     static let EmptyStateSignInButtonWidth = 200
     static let EmptyStateCreateAccountButtonFont = UIFont.systemFontOfSize(12)
 
-    // Temporary placeholder for strings removed in Bug 1193456.
-    private let CreateAccountString = NSLocalizedString("Create an account", comment: "See http://mzl.la/1Qtkf0j")
+    // Backup and active strings added in Bug 1205294.
+    static let EmptyStateInstructionsSyncTabsPasswordsBookmarksString = NSLocalizedString("Sync your tabs, bookmarks, passwords and more.", comment: "See http://mzl.la/1Qtkf0j")
+
+    static let EmptyStateInstructionsSyncTabsPasswordsString = NSLocalizedString("Sync your tabs, passwords and more.", comment: "See http://mzl.la/1Qtkf0j")
+
+    static let EmptyStateInstructionsGetTabsBookmarksPasswordsString = NSLocalizedString("Get your open tabs, bookmarks, and passwords from your other devices.", comment: "A re-worded offer about Sync that emphasizes one-way data transfer, not syncing.")
 }
 
 private let RemoteClientIdentifier = "RemoteClient"
@@ -47,7 +51,6 @@ class RemoteTabsPanel: UITableViewController, HomePanel {
     init() {
         super.init(nibName: nil, bundle: nil)
         NSNotificationCenter.defaultCenter().addObserver(self, selector: "notificationReceived:", name: NotificationFirefoxAccountChanged, object: nil)
-        NSNotificationCenter.defaultCenter().addObserver(self, selector: "notificationReceived:", name: NotificationPrivateDataCleared, object: nil)
     }
 
     required init!(coder aDecoder: NSCoder) {
@@ -72,7 +75,6 @@ class RemoteTabsPanel: UITableViewController, HomePanel {
 
     deinit {
         NSNotificationCenter.defaultCenter().removeObserver(self, name: NotificationFirefoxAccountChanged, object: nil)
-        NSNotificationCenter.defaultCenter().removeObserver(self, name: NotificationPrivateDataCleared, object: nil)
     }
 
     override func viewWillAppear(animated: Bool) {
@@ -88,7 +90,7 @@ class RemoteTabsPanel: UITableViewController, HomePanel {
 
     func notificationReceived(notification: NSNotification) {
         switch notification.name {
-        case NotificationFirefoxAccountChanged, NotificationPrivateDataCleared:
+        case NotificationFirefoxAccountChanged:
             refreshTabs()
             break
         default:
@@ -407,6 +409,7 @@ class RemoteTabsNotLoggedInCell: UITableViewCell {
         super.init(style: .Default, reuseIdentifier: RemoteTabsErrorCell.Identifier)
 
         self.homePanel = homePanel
+        let createAnAccountButton = UIButton(type: .System)
         let imageView = UIImageView()
 
         imageView.image = UIImage(named: "emptySync")
@@ -419,7 +422,7 @@ class RemoteTabsNotLoggedInCell: UITableViewCell {
         contentView.addSubview(titleLabel)
 
         instructionsLabel.font = RemoteTabsPanelUX.EmptyStateInstructionsFont
-        instructionsLabel.text = NSLocalizedString("Sync your tabs, bookmarks, passwords and more.", comment: "See http://mzl.la/1Qtkf0j")
+        instructionsLabel.text = RemoteTabsPanelUX.EmptyStateInstructionsGetTabsBookmarksPasswordsString
         instructionsLabel.textAlignment = NSTextAlignment.Center
         instructionsLabel.textColor = RemoteTabsPanelUX.EmptyStateInstructionsTextColor
         instructionsLabel.numberOfLines = 0
@@ -433,6 +436,11 @@ class RemoteTabsNotLoggedInCell: UITableViewCell {
         signInButton.clipsToBounds = true
         signInButton.addTarget(self, action: "SELsignIn", forControlEvents: UIControlEvents.TouchUpInside)
         contentView.addSubview(signInButton)
+
+        createAnAccountButton.setTitle(NSLocalizedString("Create an account", comment: "See http://mzl.la/1Qtkf0j"), forState: .Normal)
+        createAnAccountButton.titleLabel?.font = RemoteTabsPanelUX.EmptyStateCreateAccountButtonFont
+        createAnAccountButton.addTarget(self, action: "SELcreateAnAccount", forControlEvents: UIControlEvents.TouchUpInside)
+        contentView.addSubview(createAnAccountButton)
 
         imageView.snp_makeConstraints { (make) -> Void in
             make.centerX.equalTo(instructionsLabel)
@@ -448,6 +456,12 @@ class RemoteTabsNotLoggedInCell: UITableViewCell {
             make.top.equalTo(imageView.snp_bottom).offset(RemoteTabsPanelUX.EmptyStateTopPaddingInBetweenItems)
             make.centerX.equalTo(imageView)
         }
+
+
+        createAnAccountButton.snp_makeConstraints { (make) -> Void in
+            make.centerX.equalTo(signInButton)
+            make.top.equalTo(signInButton.snp_bottom).offset(RemoteTabsPanelUX.EmptyStateTopPaddingInBetweenItems)
+        }
     }
 
     required init?(coder aDecoder: NSCoder) {
@@ -457,6 +471,12 @@ class RemoteTabsNotLoggedInCell: UITableViewCell {
     @objc private func SELsignIn() {
         if let homePanel = self.homePanel {
             homePanel.homePanelDelegate?.homePanelDidRequestToSignIn(homePanel)
+        }
+    }
+
+    @objc private func SELcreateAnAccount() {
+        if let homePanel = self.homePanel {
+            homePanel.homePanelDelegate?.homePanelDidRequestToCreateAccount(homePanel)
         }
     }
 

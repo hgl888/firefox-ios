@@ -4,13 +4,15 @@
 
 import Foundation
 import Shared
+import WebKit
 
 // A base protocol for something that can be cleared.
 protocol Clearable {
     func clear() -> Success
+    var label: String { get }
 }
 
-class ClearableError : MaybeErrorType {
+class ClearableError: MaybeErrorType {
     private let msg: String
     init(msg: String) {
         self.msg = msg
@@ -20,30 +22,36 @@ class ClearableError : MaybeErrorType {
 }
 
 // Clears our browsing history, including favicons and thumbnails.
-class HistoryClearable : Clearable {
+class HistoryClearable: Clearable {
     let profile: Profile
     init(profile: Profile) {
         self.profile = profile
     }
 
-    // TODO: This can be cleaned up!
+    var label: String {
+        return NSLocalizedString("Browsing History", tableName: "ClearPrivateData", comment: "Settings item for clearing browsing history")
+    }
+
     func clear() -> Success {
-        let deferred = Success()
-        profile.history.clearHistory().upon { success in
+        return profile.history.clearHistory().bind { success in
             SDImageCache.sharedImageCache().clearDisk()
             SDImageCache.sharedImageCache().clearMemory()
-            deferred.fill(Maybe(success: ()))
+            NSNotificationCenter.defaultCenter().postNotificationName(NotificationPrivateDataClearedHistory, object: nil)
+            return Deferred(value: success)
         }
-        return deferred
     }
 }
 
 // Clear all stored passwords. This will clear both Firefox's SQLite storage and the system shared
 // Credential storage.
-class PasswordsClearable : Clearable {
+class PasswordsClearable: Clearable {
     let profile: Profile
     init(profile: Profile) {
         self.profile = profile
+    }
+
+    var label: String {
+        return NSLocalizedString("Saved Logins", tableName: "ClearPrivateData", comment: "Settings item for clearing passwords and login data")
     }
 
     func clear() -> Success {
@@ -75,27 +83,36 @@ struct ClearableErrorType: MaybeErrorType {
 
 // Clear the web cache. Note, this has to close all open tabs in order to ensure the data
 // cached in them isn't flushed to disk.
-class CacheClearable : Clearable {
+class CacheClearable: Clearable {
     let tabManager: TabManager
     init(tabManager: TabManager) {
         self.tabManager = tabManager
     }
 
+    var label: String {
+        return NSLocalizedString("Cache", tableName: "ClearPrivateData", comment: "Settings item for clearing the cache")
+    }
+
     func clear() -> Success {
-        // First ensure we close all open tabs first.
-        tabManager.removeAll()
+        if #available(iOS 9.0, *) {
+            let dataTypes = Set([WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache])
+            WKWebsiteDataStore.defaultDataStore().removeDataOfTypes(dataTypes, modifiedSince: NSDate.distantPast(), completionHandler: {})
+        } else {
+            // First ensure we close all open tabs first.
+            tabManager.removeAll()
 
-        // Reset the process pool to ensure no cached data is written back
-        tabManager.resetProcessPool()
+            // Reset the process pool to ensure no cached data is written back
+            tabManager.resetProcessPool()
 
-        // Remove the basic cache.
-        NSURLCache.sharedURLCache().removeAllCachedResponses()
+            // Remove the basic cache.
+            NSURLCache.sharedURLCache().removeAllCachedResponses()
 
-        // Now lets finish up by destroying our Cache directory.
-        do {
-            try deleteLibraryFolderContents("Caches")
-        } catch {
-            return deferMaybe(ClearableErrorType(err: error))
+            // Now let's finish up by destroying our Cache directory.
+            do {
+                try deleteLibraryFolderContents("Caches")
+            } catch {
+                return deferMaybe(ClearableErrorType(err: error))
+            }
         }
 
         return succeed()
@@ -119,79 +136,72 @@ private func deleteLibraryFolder(folder: String) throws {
     try manager.removeItemAtURL(dir)
 }
 
-// Removes all site data stored for sites. This should include things like IndexedDB or websql storage.
-class SiteDataClearable : Clearable {
+// Removes all app cache storage.
+class SiteDataClearable: Clearable {
     let tabManager: TabManager
     init(tabManager: TabManager) {
         self.tabManager = tabManager
     }
 
-    func clear() -> Success {
-        // First, close all tabs to make sure they don't hold any thing in memory.
-        tabManager.removeAll()
-
-        // Then we just wipe the WebKit directory from our Library.
-        do {
-            try deleteLibraryFolder("WebKit")
-        } catch {
-            return deferMaybe(ClearableErrorType(err: error))
-        }
-
-        return succeed()
-    }
-}
-
-// Remove all cookies stored by the site.
-class CookiesClearable : Clearable {
-    let tabManager: TabManager
-    init(tabManager: TabManager) {
-        self.tabManager = tabManager
+    var label: String {
+        return NSLocalizedString("Offline Website Data", tableName: "ClearPrivateData", comment: "Settings item for clearing website data")
     }
 
     func clear() -> Success {
-        // First close all tabs to make sure they aren't holding anything in memory.
-        tabManager.removeAll()
+        if #available(iOS 9.0, *) {
+            let dataTypes = Set([WKWebsiteDataTypeOfflineWebApplicationCache])
+            WKWebsiteDataStore.defaultDataStore().removeDataOfTypes(dataTypes, modifiedSince: NSDate.distantPast(), completionHandler: {})
+        } else {
+            // First, close all tabs to make sure they don't hold anything in memory.
+            tabManager.removeAll()
 
-        // Now we wipe the system cookie store (for our app).
-        let storage = NSHTTPCookieStorage.sharedHTTPCookieStorage()
-        if let cookies = storage.cookies {
-            for cookie in cookies {
-                storage.deleteCookie(cookie )
+            // Then we just wipe the WebKit directory from our Library.
+            do {
+                try deleteLibraryFolder("WebKit")
+            } catch {
+                return deferMaybe(ClearableErrorType(err: error))
             }
         }
 
-        // And just to be safe, we also wipe the Cookies directory.
-        do {
-            try deleteLibraryFolderContents("Cookies")
-        } catch {
-            return deferMaybe(ClearableErrorType(err: error))
-        }
-
         return succeed()
     }
 }
 
-// A Clearable designed to clear all of the locally stored data for our app.
-class EverythingClearable: Clearable {
-    private let clearables: [Clearable]
+// Remove all cookies stored by the site. This includes localStorage, sessionStorage, and WebSQL/IndexedDB.
+class CookiesClearable: Clearable {
+    let tabManager: TabManager
+    init(tabManager: TabManager) {
+        self.tabManager = tabManager
+    }
 
-    init(profile: Profile, tabmanager: TabManager) {
-        clearables = [
-            HistoryClearable(profile: profile),
-            CacheClearable(tabManager: tabmanager),
-            CookiesClearable(tabManager: tabmanager),
-            SiteDataClearable(tabManager: tabmanager),
-            PasswordsClearable(profile: profile),
-        ]
+    var label: String {
+        return NSLocalizedString("Cookies", tableName: "ClearPrivateData", comment: "Settings item for clearing cookies")
     }
 
     func clear() -> Success {
-        let deferred = Success()
-        all(clearables.map({ clearable in
-            clearable.clear()
-        })).upon({ result in
-            deferred.fill(Maybe(success: ()))
-        })
-        return deferred
+        if #available(iOS 9.0, *) {
+            let dataTypes = Set([WKWebsiteDataTypeCookies, WKWebsiteDataTypeLocalStorage, WKWebsiteDataTypeSessionStorage, WKWebsiteDataTypeWebSQLDatabases, WKWebsiteDataTypeIndexedDBDatabases])
+            WKWebsiteDataStore.defaultDataStore().removeDataOfTypes(dataTypes, modifiedSince: NSDate.distantPast(), completionHandler: {})
+        } else {
+            // First close all tabs to make sure they aren't holding anything in memory.
+            tabManager.removeAll()
+
+            // Now we wipe the system cookie store (for our app).
+            let storage = NSHTTPCookieStorage.sharedHTTPCookieStorage()
+            if let cookies = storage.cookies {
+                for cookie in cookies {
+                    storage.deleteCookie(cookie)
+                }
+            }
+
+            // And just to be safe, we also wipe the Cookies directory.
+            do {
+                try deleteLibraryFolderContents("Cookies")
+            } catch {
+                return deferMaybe(ClearableErrorType(err: error))
+            }
+        }
+
+        return succeed()
     }
 }
