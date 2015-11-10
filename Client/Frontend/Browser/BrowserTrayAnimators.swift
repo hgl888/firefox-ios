@@ -98,7 +98,6 @@ private extension TrayToBrowserAnimator {
             cell.removeFromSuperview()
             tabCollectionViewSnapshot.removeFromSuperview()
             bvc.footer.alpha = 1
-            bvc.startTrackingAccessibilityStatus()
             bvc.toggleSnackBarVisibility(show: true)
             toggleWebViewVisibility(show: true, usingTabManager: bvc.tabManager)
             bvc.webViewContainerBackdrop.hidden = false
@@ -201,7 +200,6 @@ private extension BrowserToTrayAnimator {
                 bvc.toggleSnackBarVisibility(show: true)
                 toggleWebViewVisibility(show: true, usingTabManager: bvc.tabManager)
                 bvc.homePanelController?.view.hidden = false
-                bvc.stopTrackingAccessibilityStatus()
 
                 bvc.urlBar.isTransitioning = false
                 transitionContext.completeTransition(true)
@@ -265,7 +263,7 @@ private func calculateExpandedCellFrameFromBVC(bvc: BrowserViewController) -> CG
     // there is no toolbar for home panels
     if !bvc.shouldShowFooterForTraitCollection(bvc.traitCollection) {
         return frame
-    } else if AboutUtils.isAboutURL(bvc.tabManager.selectedTab?.url) {
+    } else if AboutUtils.isAboutURL(bvc.tabManager.selectedTab?.url) && bvc.toolbar == nil {
         frame.size.height += UIConstants.ToolbarHeight
     }
 

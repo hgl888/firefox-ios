@@ -42,14 +42,13 @@ class BrowserViewController: UIViewController {
     var readerModeCache: ReaderModeCache
 
     private var statusBarOverlay: UIView!
-    private var toolbar: BrowserToolbar?
+    private(set) var toolbar: BrowserToolbar?
     private var searchController: SearchViewController?
     private let uriFixup = URIFixup()
     private var screenshotHelper: ScreenshotHelper!
     private var homePanelIsInline = false
     private var searchLoader: SearchLoader!
     private let snackBars = UIView()
-    private let auralProgress = AuralProgressBar()
     private let webViewContainerToolbar = UIView()
 
     private var openInHelper: OpenInHelper?
@@ -115,7 +114,7 @@ class BrowserViewController: UIViewController {
     }
 
     private func didInit() {
-        screenshotHelper = BrowserScreenshotHelper(controller: self)
+        screenshotHelper = ScreenshotHelper(controller: self)
         tabManager.addDelegate(self)
         tabManager.addNavigationDelegate(self)
     }
@@ -177,7 +176,12 @@ class BrowserViewController: UIViewController {
 
     override func willTransitionToTraitCollection(newCollection: UITraitCollection, withTransitionCoordinator coordinator: UIViewControllerTransitionCoordinator) {
         super.willTransitionToTraitCollection(newCollection, withTransitionCoordinator: coordinator)
-        updateToolbarStateForTraitCollection(newCollection)
+
+        // During split screen launching on iPad, this callback gets fired before viewDidLoad gets a chance to
+        // set things up. Make sure to only update the toolbar state if the view is ready for it.
+        if isViewLoaded() {
+            updateToolbarStateForTraitCollection(newCollection)
+        }
 
         // WKWebView looks like it has a bug where it doesn't invalidate it's visible area when the user
         // performs a device rotation. Since scrolling calls
@@ -369,17 +373,14 @@ class BrowserViewController: UIViewController {
             // This assumes that the DB returns rows in some kind of sane order.
             // It does in practice, so WFM.
             log.debug("Queue. Count: \(cursor.count).")
-            if cursor.count > 0 {
-                var urls = [NSURL]()
-                for row in cursor {
-                    if let url = row?.url.asURL {
-                        urls.append(url)
-                    }
-                }
-                if !urls.isEmpty {
-                    dispatch_async(dispatch_get_main_queue()) {
-                        self.tabManager.addTabsForURLs(urls, zombie: false)
-                    }
+            if cursor.count <= 0 {
+                return
+            }
+
+            let urls = cursor.flatMap { $0?.url.asURL }
+            if !urls.isEmpty {
+                dispatch_async(dispatch_get_main_queue()) {
+                    self.tabManager.addTabsForURLs(urls, zombie: false)
                 }
             }
 
@@ -388,18 +389,6 @@ class BrowserViewController: UIViewController {
             // rather than losing data.
             self.profile.queue.clearQueuedTabs()
         }
-    }
-
-    func startTrackingAccessibilityStatus() {
-        NSNotificationCenter.defaultCenter().addObserverForName(UIAccessibilityVoiceOverStatusChanged, object: nil, queue: nil) { (notification) -> Void in
-            self.auralProgress.hidden = !UIAccessibilityIsVoiceOverRunning()
-        }
-        auralProgress.hidden = !UIAccessibilityIsVoiceOverRunning()
-    }
-
-    func stopTrackingAccessibilityStatus() {
-        NSNotificationCenter.defaultCenter().removeObserver(self, name: UIAccessibilityVoiceOverStatusChanged, object: nil)
-        auralProgress.hidden = true
     }
 
     override func viewWillAppear(animated: Bool) {
@@ -472,14 +461,19 @@ class BrowserViewController: UIViewController {
     }
 
     override func viewDidAppear(animated: Bool) {
-        startTrackingAccessibilityStatus()
         presentIntroViewController()
         self.webViewContainerToolbar.hidden = false
+
+        screenshotHelper.viewIsVisible = true
+        screenshotHelper.takePendingScreenshots(tabManager.tabs)
+
         super.viewDidAppear(animated)
     }
 
-    override func viewDidDisappear(animated: Bool) {
-        stopTrackingAccessibilityStatus()
+    override func viewWillDisappear(animated: Bool) {
+        screenshotHelper.viewIsVisible = false
+
+        super.viewWillDisappear(animated)
     }
 
     override func updateViewConstraints() {
@@ -581,7 +575,6 @@ class BrowserViewController: UIViewController {
         }, completion: { finished in
             if finished {
                 self.webViewContainer.accessibilityElementsHidden = true
-                self.stopTrackingAccessibilityStatus()
                 UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, nil)
             }
         })
@@ -599,7 +592,6 @@ class BrowserViewController: UIViewController {
                     controller.removeFromParentViewController()
                     self.homePanelController = nil
                     self.webViewContainer.accessibilityElementsHidden = false
-                    self.startTrackingAccessibilityStatus()
                     UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, nil)
 
                     // Refresh the reading view toolbar since the article record may have changed
@@ -626,7 +618,8 @@ class BrowserViewController: UIViewController {
             return
         }
 
-        searchController = SearchViewController()
+        let isPrivate = tabManager.selectedTab?.isPrivate ?? false
+        searchController = SearchViewController(isPrivate: isPrivate)
         searchController!.searchEngines = profile.searchEngines
         searchController!.searchDelegate = self
         searchController!.profile = self.profile
@@ -751,15 +744,10 @@ class BrowserViewController: UIViewController {
         case KVOEstimatedProgress:
             guard let progress = change?[NSKeyValueChangeNewKey] as? Float else { break }
             urlBar.updateProgressBar(progress)
-            // when loading is stopped, KVOLoading is fired first, and only then KVOEstimatedProgress with progress 1.0 which would leave the progress bar running
-            if progress != 1.0 || tabManager.selectedTab?.loading ?? false {
-                auralProgress.progress = Double(progress)
-            }
         case KVOLoading:
             guard let loading = change?[NSKeyValueChangeNewKey] as? Bool else { break }
             toolbar?.updateReloadStatus(loading)
             urlBar.updateReloadStatus(loading)
-            auralProgress.progress = loading ? 0 : nil
         case KVOURL:
             if let tab = tabManager.selectedTab where tab.webView?.URL == nil {
                 log.debug("URL is nil!")
@@ -867,6 +855,7 @@ extension BrowserViewController {
 }
 
 extension BrowserViewController: URLBarDelegate {
+
     func urlBarDidPressReload(urlBar: URLBarView) {
         tabManager.selectedTab?.reload()
     }
@@ -880,7 +869,7 @@ extension BrowserViewController: URLBarDelegate {
         let tabTrayController = TabTrayController(tabManager: tabManager, profile: profile)
 
         if let tab = tabManager.selectedTab {
-            tab.setScreenshot(screenshotHelper.takeScreenshot(tab, aspectRatio: 0, quality: 1))
+            screenshotHelper.takeScreenshot(tab)
         }
 
         self.navigationController?.pushViewController(tabTrayController, animated: true)
@@ -928,6 +917,15 @@ extension BrowserViewController: URLBarDelegate {
         } else {
             return [copyAddressAction]
         }
+    }
+
+    func urlBarDisplayTextForURL(url: NSURL?) -> String? {
+        // use the initial value for the URL so we can do proper pattern matching with search URLs
+        var searchURL = self.tabManager.selectedTab?.currentInitialURL
+        if searchURL == nil || ErrorPageHelper.isErrorPageURL(searchURL!) {
+            searchURL = url
+        }
+        return profile.searchEngines.queryForSearchURL(searchURL) ?? url?.absoluteString
     }
 
     func urlBarDidLongPressLocation(urlBar: URLBarView) {
@@ -1039,7 +1037,7 @@ extension BrowserViewController: BrowserToolbarDelegate {
                 log.error("Bookmark error: No tab is selected, or no URL in tab.")
                 return
         }
-        profile.bookmarks.isBookmarked(url).upon {
+        profile.bookmarks.isBookmarked(url).uponQueue(dispatch_get_main_queue()) {
             guard let isBookmarked = $0.successValue else {
                 log.error("Bookmark error: \($0.failureValue).")
                 return
@@ -1358,9 +1356,6 @@ extension BrowserViewController: TabManagerDelegate {
 
             updateURLBarDisplayURL(tab)
 
-            let count = tab.isPrivate ? tabManager.privateTabs.count : tabManager.normalTabs.count
-            urlBar.updateTabCount(count, animated: false)
-
             if tab.isPrivate {
                 readerModeCache = MemoryReaderModeCache.sharedInstance
                 applyPrivateModeTheme()
@@ -1379,14 +1374,19 @@ extension BrowserViewController: TabManagerDelegate {
             addOpenInViewIfNeccessary(webView.URL)
 
             if let url = webView.URL?.absoluteString {
-                profile.bookmarks.isBookmarked(url).upon {
-                    guard let isBookmarked = $0.successValue else {
-                        log.error("Error getting bookmark status: \($0.failureValue).")
-                        return
-                    }
+                // Don't bother fetching bookmark state for about/sessionrestore and about/home.
+                if AboutUtils.isAboutURL(webView.URL) {
+                    // Indeed, because we don't show the toolbar at all, don't even blank the star.
+                } else {
+                    profile.bookmarks.isBookmarked(url).uponQueue(dispatch_get_main_queue()) {
+                        guard let isBookmarked = $0.successValue else {
+                            log.error("Error getting bookmark status: \($0.failureValue).")
+                            return
+                        }
 
-                    self.toolbar?.updateBookmarkStatus(isBookmarked)
-                    self.urlBar.updateBookmarkStatus(isBookmarked)
+                        self.toolbar?.updateBookmarkStatus(isBookmarked)
+                        self.urlBar.updateBookmarkStatus(isBookmarked)
+                    }
                 }
             } else {
                 // The web view can go gray if it was zombified due to memory pressure.
@@ -1591,6 +1591,8 @@ extension BrowserViewController: WKNavigationDelegate {
             // VoiceOver will sometimes be stuck on the element, not allowing user to move
             // forward/backward. Strange, but LayoutChanged fixes that.
             UIAccessibilityPostNotification(UIAccessibilityLayoutChangedNotification, nil)
+        } else {
+            screenshotHelper.takeDelayedScreenshot(tab)
         }
 
         addOpenInViewIfNeccessary(webView.URL)
@@ -1639,7 +1641,7 @@ extension BrowserViewController: WKUIDelegate {
 
         guard let currentTab = tabManager.selectedTab else { return nil }
 
-        currentTab.setScreenshot(screenshotHelper.takeScreenshot(currentTab, aspectRatio: 0, quality: 1))
+        screenshotHelper.takeScreenshot(currentTab)
 
         // If the page uses window.open() or target="_blank", open the page in a new tab.
         // TODO: This doesn't work for window.open() without user action (bug 1124942).
@@ -1971,29 +1973,6 @@ extension BrowserViewController: ReaderModeBarViewDelegate {
     }
 }
 
-private class BrowserScreenshotHelper: ScreenshotHelper {
-    private weak var controller: BrowserViewController?
-
-    init(controller: BrowserViewController) {
-        self.controller = controller
-    }
-
-    func takeScreenshot(tab: Browser, aspectRatio: CGFloat, quality: CGFloat) -> UIImage? {
-        if let url = tab.url {
-            if AboutUtils.isAboutHomeURL(url) {
-                if let homePanel = controller?.homePanelController {
-                    return homePanel.view.screenshot(aspectRatio, quality: quality)
-                }
-            } else {
-                let offset = CGPointMake(0, -(tab.webView?.scrollView.contentInset.top ?? 0))
-                return tab.webView?.screenshot(aspectRatio, offset: offset, quality: quality)
-            }
-        }
-
-        return nil
-    }
-}
-
 extension BrowserViewController: IntroViewControllerDelegate {
     func presentIntroViewController(force: Bool = false) -> Bool{
         if force || profile.prefs.intForKey(IntroViewControllerSeenProfileKey) == nil {
@@ -2249,6 +2228,9 @@ extension BrowserViewController {
         TabsButton.appearance().textColor = UIConstants.PrivateModePurple
         TabsButton.appearance().insets = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
 
+        ReaderModeBarView.appearance().backgroundColor = UIConstants.PrivateModeReaderModeBackgroundColor
+        ReaderModeBarView.appearance().buttonTintColor = UIColor.whiteColor()
+
         header.blurStyle = .Dark
         footerBackground?.blurStyle = .Dark
     }
@@ -2277,6 +2259,9 @@ extension BrowserViewController {
         TabsButton.appearance().titleBackgroundColor = TabsButtonUX.TitleBackgroundColor
         TabsButton.appearance().textColor = TabsButtonUX.TitleColor
         TabsButton.appearance().insets = TabsButtonUX.TitleInsets
+
+        ReaderModeBarView.appearance().backgroundColor = UIColor.whiteColor()
+        ReaderModeBarView.appearance().buttonTintColor = UIColor.darkGrayColor()
 
         header.blurStyle = .ExtraLight
         footerBackground?.blurStyle = .ExtraLight

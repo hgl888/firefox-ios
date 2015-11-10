@@ -30,6 +30,9 @@ public class MockSyncManager: SyncManager {
         self.endTimedSyncs()
     }
 
+    public func onNewProfile() {
+    }
+
     public func onAddedAccount() -> Success {
         return succeed()
     }
@@ -76,7 +79,7 @@ public class MockProfile: Profile {
      * collection of tables.
      */
     private lazy var places: protocol<BrowserHistory, Favicons, SyncableHistory, ResettableSyncStorage> = {
-        return SQLiteHistory(db: self.db)!
+        return SQLiteHistory(db: self.db, prefs: MockProfilePrefs())!
     }()
 
     var favicons: Favicons {
@@ -95,7 +98,7 @@ public class MockProfile: Profile {
         return MockSyncManager()
     }()
 
-    lazy var bookmarks: protocol<BookmarksModelFactory, ShareToDestination, ResettableSyncStorage> = {
+    lazy var bookmarks: protocol<BookmarksModelFactory, ShareToDestination, ResettableSyncStorage, AccountRemovalDelegate> = {
         // Make sure the rest of our tables are initialized before we try to read them!
         // This expression is for side-effects only.
         let p = self.places
